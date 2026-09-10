@@ -1,0 +1,459 @@
+{
+  "info": {
+    "_postman_id": "ac-reto-collection-2026",
+    "name": "Atlantic City — Cargas Masivas",
+    "description": "Colección completa del Reto Técnico Backend Senior — Casino Atlantic City 2026.\n\nCubre el 100% de los endpoints expuestos por el API Gateway, organizada en carpetas por microservicio.\n\n**Flujo de uso:**\n1. Configura el environment `Atlantic City — Local`.\n2. Ejecuta `Auth > Login` — el token se guarda automáticamente.\n3. Ejecuta `Cargas > Subir Excel` — el idCarga se guarda automáticamente.\n4. Ejecuta el resto de las requests en orden.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "gateway_url",
+      "value": "http://localhost:5000",
+      "type": "string",
+      "description": "URL base del API Gateway"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string",
+      "description": "JWT de acceso — se rellena automáticamente al ejecutar Login"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string",
+      "description": "Refresh Token — se rellena automáticamente al ejecutar Login"
+    },
+    {
+      "key": "idCarga",
+      "value": "",
+      "type": "string",
+      "description": "GUID de la carga activa — se rellena automáticamente al ejecutar Subir Excel"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "description": "Endpoints del Microservicio de Autenticación (Auth.Api).\n\nExpuestos a través del Gateway en /api/v1/auth.",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200 OK\", () => pm.response.to.have.status(200));",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set(\"token\", body.accessToken);",
+                  "    pm.collectionVariables.set(\"refreshToken\", body.refreshToken);",
+                  "    pm.test(\"accessToken presente\", () => pm.expect(body.accessToken).to.be.a('string').and.not.empty);",
+                  "    pm.test(\"refreshToken presente\", () => pm.expect(body.refreshToken).to.be.a('string').and.not.empty);",
+                  "    pm.test(\"role presente\", () => pm.expect(body.role).to.be.a('string'));",
+                  "    console.log('✅ Token guardado:', body.accessToken.substring(0, 30) + '...');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"Admin#2026\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gateway_url}}/api/v1/auth/login",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Autentica al usuario y obtiene un JWT de acceso y un Refresh Token.\n\n**Precondiciones:** Ninguna — es el primer paso del flujo.\n\n**Post-condición:** Las variables `token` y `refreshToken` se guardan automáticamente en la colección para ser usadas en las siguientes requests."
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200 OK\", () => pm.response.to.have.status(200));",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set(\"token\", body.accessToken);",
+                  "    pm.collectionVariables.set(\"refreshToken\", body.refreshToken);",
+                  "    pm.test(\"Nuevo accessToken presente\", () => pm.expect(body.accessToken).to.be.a('string').and.not.empty);",
+                  "    console.log('✅ Token renovado correctamente');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gateway_url}}/api/v1/auth/refresh",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Renueva el JWT de acceso usando el Refresh Token vigente.\n\n**Precondiciones:** Haber ejecutado `Login` previamente (la variable `refreshToken` debe estar poblada).\n\n**Post-condición:** Las variables `token` y `refreshToken` se actualizan con los nuevos valores."
+          }
+        },
+        {
+          "name": "Health — Auth",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Auth service healthy\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:5001/health",
+              "host": [
+                "localhost"
+              ],
+              "port": "5001",
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Health check directo al Microservicio Auth (sin pasar por Gateway).\n\nVerifica la conectividad con SQL Server.\n\n**Precondiciones:** Auth.Api corriendo en el puerto 5001."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cargas (Control)",
+      "description": "Endpoints del Microservicio de Control (Control.Api).\n\nExpuestos a través del Gateway en /api/v1/cargas.\n\n⚠️ Todos los endpoints requieren el header `Authorization: Bearer {{token}}` que se adjunta automáticamente desde la variable de colección.",
+      "item": [
+        {
+          "name": "Subir Excel",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 201 Created\", () => pm.response.to.have.status(201));",
+                  "",
+                  "if (pm.response.code === 201) {",
+                  "    const body = pm.response.json();",
+                  "    const idCarga = body.id ?? body.idCarga;",
+                  "    if (idCarga) {",
+                  "        pm.collectionVariables.set(\"idCarga\", idCarga);",
+                  "        pm.test(\"idCarga guardado\", () => pm.expect(idCarga).to.be.a('string').and.not.empty);",
+                  "        console.log('✅ idCarga guardado:', idCarga);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "archivo",
+                  "type": "file",
+                  "src": [],
+                  "description": "Archivo .xlsx a procesar (seleccionar desde el equipo local)"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{gateway_url}}/api/v1/cargas",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cargas"
+              ]
+            },
+            "description": "Sube un archivo Excel (.xlsx) para procesamiento masivo asíncrono.\n\n**Precondiciones:**\n- Haber ejecutado `Login` (token válido).\n- El usuario debe tener el rol `CargaMasiva.Ejecutor`.\n- El archivo debe ser `.xlsx` y no exceder el tamaño máximo configurado.\n\n**Respuesta:** `201 Created` con el `id` de la carga creada.\n\n**Post-condición:** La variable `idCarga` se guarda automáticamente para las siguientes requests."
+          }
+        },
+        {
+          "name": "Historial de Cargas",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Respuesta tiene items\", () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('items');",
+                  "    pm.expect(body.items).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway_url}}/api/v1/cargas?pageNumber=1&pageSize=20",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cargas"
+              ],
+              "query": [
+                {
+                  "key": "pageNumber",
+                  "value": "1",
+                  "description": "Número de página (base 1)"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20",
+                  "description": "Registros por página"
+                }
+              ]
+            },
+            "description": "Retorna el historial paginado de cargas del usuario autenticado.\n\n**Precondiciones:** Haber ejecutado `Login`.\n\n**Nota:** Si el usuario tiene rol `Admin`, ve todas las cargas. En caso contrario, solo ve las propias."
+          }
+        },
+        {
+          "name": "Detalle de Carga",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Respuesta tiene estado\", () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('estado');",
+                  "    pm.expect(body).to.have.property('nombreArchivo');",
+                  "    console.log('Estado actual:', body.estado);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway_url}}/api/v1/cargas/{{idCarga}}",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cargas",
+                "{{idCarga}}"
+              ]
+            },
+            "description": "Obtiene el detalle completo de una carga específica, incluyendo su estado actual.\n\n**Precondiciones:**\n- Haber ejecutado `Login`.\n- Haber ejecutado `Subir Excel` (variable `idCarga` poblada) — o sustituir manualmente el GUID.\n\n**Estados posibles:** `Pendiente` → `En proceso` → `Cargado` → `Finalizado` → `Notificado`."
+          }
+        },
+        {
+          "name": "Contenido del Excel",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Content-Type es xlsx\", () => {",
+                  "    pm.expect(pm.response.headers.get('Content-Type'))",
+                  "        .to.include('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway_url}}/api/v1/cargas/{{idCarga}}/contenido",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cargas",
+                "{{idCarga}}",
+                "contenido"
+              ]
+            },
+            "description": "Descarga el archivo Excel original subido para la carga especificada.\n\n**Precondiciones:**\n- Haber ejecutado `Login`.\n- La carga debe existir (variable `idCarga` poblada).\n\n**Respuesta:** Archivo binario `.xlsx` para descarga directa."
+          }
+        },
+        {
+          "name": "Health — Control",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Control service healthy\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:5002/health",
+              "host": [
+                "localhost"
+              ],
+              "port": "5002",
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Health check directo al Microservicio Control (sin pasar por Gateway).\n\nVerifica la conectividad con SQL Server y RabbitMQ.\n\n**Precondiciones:** Control.Api corriendo en el puerto 5002."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Gateway",
+      "description": "Endpoints directos del API Gateway (Health Check y Swagger).",
+      "item": [
+        {
+          "name": "Health — Gateway",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Gateway healthy\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway_url}}/health",
+              "host": [
+                "{{gateway_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Health check del API Gateway."
+          }
+        }
+      ]
+    }
+  ]
+}

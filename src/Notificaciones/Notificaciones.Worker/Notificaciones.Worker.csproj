@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-Notificaciones.Worker-2fd1e23d-24cd-4a70-a2d9-dc00c99096d4</UserSecretsId>
+    <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ORM / Persistence -->
+    <PackageReference Include="Dapper" Version="2.1.79" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
+
+    <!-- Email -->
+    <PackageReference Include="MailKit" Version="4.17.0" />
+
+    <!-- Messaging -->
+    <PackageReference Include="MassTransit.RabbitMQ" Version="9.2.1" />
+
+    <!-- Hosting -->
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+
+    <!-- Resilience -->
+    <PackageReference Include="Polly" Version="8.7.0" />
+
+    <!-- Logging -->
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.1" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+
+    <!-- Health Checks -->
+    <PackageReference Include="AspNetCore.HealthChecks.SqlServer" Version="8.0.2" />
+    <PackageReference Include="AspNetCore.HealthChecks.Rabbitmq" Version="8.0.2" />
+  </ItemGroup>
+
+</Project>

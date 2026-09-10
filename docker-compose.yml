@@ -1,0 +1,279 @@
+version: "3.9"
+
+# ---------------------------------------------------------------------------
+# Docker Compose - Infraestructura base del Reto Técnico Backend Senior
+# Este archivo levanta únicamente la infraestructura compartida:
+#   - SQL Server (persistencia)
+#   - RabbitMQ (mensajería, con plugin Management)
+#   - SeaweedFS (almacenamiento distribuido de archivos)
+# Los microservicios (.NET) y el frontend (React) se agregan en un paso
+# posterior del plan, una vez que cada proyecto exista.
+# ---------------------------------------------------------------------------
+
+networks:
+  atlantic_network:
+    driver: bridge
+    name: atlantic_network
+
+volumes:
+  sqlserver_data:
+  rabbitmq_data:
+  seaweedfs_master_data:
+  seaweedfs_volume_data:
+
+services:
+
+  # -------------------------------------------------------------------------
+  # SQL Server: motor de base de datos único de la solución.
+  # SA_PASSWORD y ACCEPT_EULA son obligatorios para el arranque del contenedor.
+  # El valor de SA_PASSWORD debe sobrescribirse en un archivo .env local
+  # (ver .env.example) y NUNCA commitearse con un valor real.
+  # -------------------------------------------------------------------------
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: atlantic-sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${SQLSERVER_SA_PASSWORD:?SQLSERVER_SA_PASSWORD no definido en .env}"
+      MSSQL_PID: "Express"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    networks:
+      - atlantic_network
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # RabbitMQ: broker de mensajería con UI de administración (puerto 15672).
+  # Credenciales configurables vía variables de entorno (ver .env.example).
+  # -------------------------------------------------------------------------
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: atlantic-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: "${RABBITMQ_USER:-atlantic}"
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD no definido en .env}"
+    ports:
+      - "5672:5672"   # Protocolo AMQP (usado por MassTransit)
+      - "15672:15672" # UI de Management (http://localhost:15672)
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - atlantic_network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # SeaweedFS Master: coordina los Volume Servers y expone el API de gestión.
+  # -------------------------------------------------------------------------
+  seaweedfs-master:
+    image: chrislusf/seaweedfs:latest
+    container_name: atlantic-seaweedfs-master
+    command: "master -ip=seaweedfs-master -ip.bind=0.0.0.0 -metricsPort=9324"
+    ports:
+      - "9333:9333" # API del Master
+      - "19333:19333"
+    volumes:
+      - seaweedfs_master_data:/data
+    networks:
+      - atlantic_network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9333/cluster/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # SeaweedFS Volume: almacena los datos físicos de los archivos (.xlsx).
+  # Se conecta al Master para registrar su capacidad.
+  # -------------------------------------------------------------------------
+  seaweedfs-volume:
+    image: chrislusf/seaweedfs:latest
+    container_name: atlantic-seaweedfs-volume
+    command: "volume -mserver=seaweedfs-master:9333 -ip.bind=0.0.0.0 -port=8080"
+    ports:
+      - "8080:8080" # API de subida/descarga de archivos usada por el Microservicio de Control
+    volumes:
+      - seaweedfs_volume_data:/data
+    depends_on:
+      seaweedfs-master:
+        condition: service_healthy
+    networks:
+      - atlantic_network
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # SeaweedFS Filer: expone una API HTTP tipo sistema de archivos (S3/REST)
+  # más amigable para el Microservicio de Control al subir/descargar .xlsx.
+  # -------------------------------------------------------------------------
+  seaweedfs-filer:
+    image: chrislusf/seaweedfs:latest
+    container_name: atlantic-seaweedfs-filer
+    command: "filer -master=seaweedfs-master:9333 -ip.bind=0.0.0.0"
+    ports:
+      - "8888:8888" # API HTTP del Filer (subida/descarga de archivos)
+      - "18888:18888"
+    depends_on:
+      seaweedfs-master:
+        condition: service_healthy
+      seaweedfs-volume:
+        condition: service_started
+    networks:
+      - atlantic_network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Microservicio 3 – Notificaciones (Worker / Consumidor de la cola notificaciones)
+  # Escucha la cola "notificaciones", envía correo con MailKit y marca estado
+  # "Notificado" en la base de datos vía Stored Procedure + Dapper.
+  # ===========================================================================
+  notificaciones-service:
+    build:
+      context: .
+      dockerfile: src/Notificaciones/Notificaciones.Worker/Dockerfile
+    container_name: atlantic-notificaciones
+    environment:
+      DOTNET_ENVIRONMENT: "Production"
+      Database__ControlDatabase: "Server=atlantic-sqlserver,1433;Database=ControlDb;User Id=sa;Password=${SQLSERVER_SA_PASSWORD};TrustServerCertificate=True;"
+      RabbitMq__Host: "atlantic-rabbitmq"
+      RabbitMq__Username: "${RABBITMQ_USER:-atlantic}"
+      RabbitMq__Password: "${RABBITMQ_PASSWORD}"
+      RabbitMq__NotificacionesQueue: "notificaciones"
+      Smtp__Host: "${SMTP_HOST}"
+      Smtp__Port: "${SMTP_PORT:-587}"
+      Smtp__User: "${SMTP_USER}"
+      Smtp__Password: "${SMTP_PASSWORD}"
+      Smtp__FromAddress: "${SMTP_FROM_ADDRESS}"
+      Smtp__FromName: "${SMTP_FROM_NAME:-Atlantic City Casino Sports}"
+      Smtp__UseSsl: "${SMTP_USE_SSL:-true}"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - atlantic_network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Microservicios .NET (Backend)
+  # ===========================================================================
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: src/Auth/Auth.Api/Dockerfile
+    container_name: atlantic-auth
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Development"
+      ConnectionStrings__AuthDatabase: "Server=atlantic-sqlserver,1433;Database=AuthDb;User Id=sa;Password=${SQLSERVER_SA_PASSWORD};TrustServerCertificate=True;"
+      Jwt__Secret: "${JWT_SECRET}"
+      AdminUser__Email: "${ADMIN_EMAIL:-admin@atlanticcity.local}"
+    ports:
+      - "5001:8080"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    networks:
+      - atlantic_network
+    restart: unless-stopped
+
+  control-service:
+    build:
+      context: .
+      dockerfile: src/Control/Control.Api/Dockerfile
+    container_name: atlantic-control
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Development"
+      ConnectionStrings__ControlDatabase: "Server=atlantic-sqlserver,1433;Database=ControlDb;User Id=sa;Password=${SQLSERVER_SA_PASSWORD};TrustServerCertificate=True;"
+      RabbitMq__Host: "atlantic-rabbitmq"
+      RabbitMq__Username: "${RABBITMQ_USER:-atlantic}"
+      RabbitMq__Password: "${RABBITMQ_PASSWORD}"
+      SeaweedFS__FilerUrl: "http://atlantic-seaweedfs-filer:8888"
+      Jwt__Secret: "${JWT_SECRET}"
+    ports:
+      - "5002:8080"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - atlantic_network
+    restart: unless-stopped
+
+  cargamasiva-service:
+    build:
+      context: .
+      dockerfile: src/CargaMasiva/CargaMasiva.Worker/Dockerfile
+    container_name: atlantic-cargamasiva
+    environment:
+      DOTNET_ENVIRONMENT: "Production"
+      ConnectionStrings__ControlDatabase: "Server=atlantic-sqlserver,1433;Database=ControlDb;User Id=sa;Password=${SQLSERVER_SA_PASSWORD};TrustServerCertificate=True;"
+      RabbitMq__Host: "atlantic-rabbitmq"
+      RabbitMq__Username: "${RABBITMQ_USER:-atlantic}"
+      RabbitMq__Password: "${RABBITMQ_PASSWORD}"
+      RabbitMq__CargaMasivaQueue: "carga_masiva"
+      SeaweedFS__FilerUrl: "http://atlantic-seaweedfs-filer:8888"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - atlantic_network
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: src/Gateway/Gateway.Api/Dockerfile
+    container_name: atlantic-gateway
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Development"
+      Jwt__Secret: "${JWT_SECRET}"
+      ReverseProxy__Clusters__auth-cluster__Destinations__auth-destination__Address: "http://atlantic-auth:8080/"
+      ReverseProxy__Clusters__control-cluster__Destinations__control-destination__Address: "http://atlantic-control:8080/"
+    ports:
+      - "5000:8080"
+    depends_on:
+      - auth-service
+      - control-service
+    networks:
+      - atlantic_network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Web Client — React SPA servida por Nginx (puerto 3000)
+  # Consume el API Gateway en VITE_API_BASE_URL.
+  # VITE_* son variables de BUILD-TIME: se hornean en el bundle JS en el
+  # momento del docker build, no en tiempo de ejecución.
+  # ===========================================================================
+  web-client:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: "${GATEWAY_URL:-http://localhost:5000}"
+        VITE_POLLING_INTERVAL_MS: "${POLLING_INTERVAL_MS:-6000}"
+        VITE_MAX_FILE_SIZE_MB: "${MAX_FILE_SIZE_MB:-10}"
+    container_name: atlantic-web-client
+    ports:
+      - "3000:80"
+    networks:
+      - atlantic_network
+    restart: unless-stopped
